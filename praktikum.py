@@ -18,11 +18,19 @@ st.markdown("""
     .stApp {
         background: linear-gradient(to bottom right, #e0eafc, #cfdef3);
     }
+    .stSidebar {
+        background-color: rgba(255, 255, 255, 0.6) !important;
+        backdrop-filter: blur(10px);
+    }
     
     /* Background Mode Gelap */
     @media (prefers-color-scheme: dark) {
         .stApp {
             background: linear-gradient(to bottom right, #0f2027, #203a43, #2c5364) !important;
+        }
+        .stSidebar {
+            background-color: rgba(15, 23, 42, 0.6) !important;
+            backdrop-filter: blur(10px);
         }
         /* Menyesuaikan warna judul di mode gelap agar lebih terang dan terbaca */
         .main-title {
