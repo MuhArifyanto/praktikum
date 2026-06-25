@@ -16,25 +16,25 @@ st.markdown("""
 <style>
     /* Background Mode Terang (Default) */
     .stApp {
-        background: linear-gradient(to bottom right, #e0eafc, #cfdef3);
+        background: linear-gradient(135deg, #fbc2eb 0%, #a6c1ee 100%);
     }
     .stSidebar {
-        background-color: rgba(255, 255, 255, 0.6) !important;
-        backdrop-filter: blur(10px);
+        background-color: rgba(255, 255, 255, 0.4) !important;
+        backdrop-filter: blur(15px);
     }
     
     /* Background Mode Gelap */
     @media (prefers-color-scheme: dark) {
         .stApp {
-            background: linear-gradient(to bottom right, #0f2027, #203a43, #2c5364) !important;
+            background: linear-gradient(135deg, #3a1c71 0%, #d76d77 50%, #ffaf7b 100%) !important;
         }
         .stSidebar {
-            background-color: rgba(15, 23, 42, 0.6) !important;
-            backdrop-filter: blur(10px);
+            background-color: rgba(0, 0, 0, 0.3) !important;
+            backdrop-filter: blur(15px);
         }
         /* Menyesuaikan warna judul di mode gelap agar lebih terang dan terbaca */
         .main-title {
-            background: -webkit-linear-gradient(45deg, #93C5FD, #C4B5FD) !important;
+            background: -webkit-linear-gradient(45deg, #FFD700, #FF8C00) !important;
             -webkit-background-clip: text !important;
             -webkit-text-fill-color: transparent !important;
         }
