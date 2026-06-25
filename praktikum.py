@@ -20,7 +20,7 @@ Model akan mempelajari pola kebiasaan makan dan kondisi fisik dari dataset untuk
 st.sidebar.header("1. Pengaturan Dataset")
 
 # Logika cerdas: Cari file lokal dulu, jika tidak ada baru minta upload
-default_file = 'ObesityDataSet_expanded.csv'
+default_file = 'ObesityDataSet_raw_and_data_sinthetic.csv'
 df = None
 
 if os.path.exists(default_file):
