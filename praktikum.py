@@ -14,27 +14,27 @@ st.set_page_config(page_title="Klasifikasi Tingkat Obesitas", page_icon="🩺", 
 # --- CUSTOM CSS ---
 st.markdown("""
 <style>
-    /* Background Mode Terang (Default) */
+    /* Background Mode Terang (Default) - White to Green */
     .stApp {
-        background: linear-gradient(135deg, #fbc2eb 0%, #a6c1ee 100%);
+        background: linear-gradient(135deg, #ffffff 0%, #c1dfc4 100%);
     }
     .stSidebar {
         background-color: rgba(255, 255, 255, 0.4) !important;
         backdrop-filter: blur(15px);
     }
     
-    /* Background Mode Gelap */
+    /* Background Mode Gelap - Black to Emerald Green */
     @media (prefers-color-scheme: dark) {
         .stApp {
-            background: linear-gradient(135deg, #3a1c71 0%, #d76d77 50%, #ffaf7b 100%) !important;
+            background: linear-gradient(135deg, #000000 0%, #0f3424 50%, #115937 100%) !important;
         }
         .stSidebar {
             background-color: rgba(0, 0, 0, 0.3) !important;
             backdrop-filter: blur(15px);
         }
-        /* Menyesuaikan warna judul di mode gelap agar lebih terang dan terbaca */
+        /* Menyesuaikan warna judul di mode gelap */
         .main-title {
-            background: -webkit-linear-gradient(45deg, #FFD700, #FF8C00) !important;
+            background: -webkit-linear-gradient(45deg, #a8e063, #ffffff) !important;
             -webkit-background-clip: text !important;
             -webkit-text-fill-color: transparent !important;
         }
@@ -44,19 +44,19 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     
-    /* Mempercantik Judul Utama */
+    /* Mempercantik Judul Utama (Mode Terang) - Emerald Green */
     .main-title {
         font-size: 3rem !important;
         font-weight: 800;
-        background: -webkit-linear-gradient(45deg, #1E3A8A, #3B82F6);
+        background: -webkit-linear-gradient(45deg, #059669, #10B981);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         margin-bottom: 0px;
     }
     
-    /* Mempercantik tombol Latih Model */
+    /* Mempercantik tombol Latih Model - Green Gradient */
     .stButton > button {
-        background: linear-gradient(90deg, #3B82F6 0%, #8B5CF6 100%);
+        background: linear-gradient(90deg, #10B981 0%, #059669 100%);
         color: white;
         border: none;
         padding: 10px 24px;
@@ -66,7 +66,7 @@ st.markdown("""
     }
     .stButton > button:hover {
         transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
         color: white;
     }
     
