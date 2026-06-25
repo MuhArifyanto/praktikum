@@ -14,6 +14,13 @@ st.set_page_config(page_title="Klasifikasi Tingkat Obesitas", page_icon="🩺", 
 # --- CUSTOM CSS ---
 st.markdown("""
 <style>
+    /* Background Gradasi Aplikasi */
+    .stApp {
+        background: linear-gradient(135deg, #fdfbfb 0%, #ebedee 100%);
+        /* Atau untuk warna kebiruan lembut: background: linear-gradient(to right bottom, #e0eafc, #cfdef3); */
+        background: linear-gradient(to bottom right, #e0eafc, #cfdef3);
+    }
+    
     /* Menyembunyikan menu bawaan Streamlit agar lebih bersih */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
