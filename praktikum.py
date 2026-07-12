@@ -11,6 +11,7 @@ matplotlib.use('Agg')
 
 import os
 import warnings
+from typing import Optional
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -280,7 +281,7 @@ with st.sidebar:
     st.header("⚙️ Pengaturan Dataset")
     st.caption("Sistem mencari dataset lokal otomatis. Jika tidak ada, Anda bisa upload secara manual.")
 
-df: pd.DataFrame | None = None
+df = None  # type: Optional[pd.DataFrame]
 
 if os.path.exists(DEFAULT_DATASET):
     st.sidebar.success("✅ Dataset lokal ditemukan!")
