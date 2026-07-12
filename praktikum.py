@@ -107,7 +107,7 @@ if df is not None:
     
     # Memasukkan dataframe ke dalam expander agar tidak memakan banyak tempat
     with st.expander("Klik untuk melihat detail dataset (5 Baris Pertama)"):
-        st.dataframe(df.head(), use_container_width=True)
+        st.dataframe(df.head(), width='stretch')
         st.caption(f"Total Data: **{df.shape[0]} baris** dan **{df.shape[1]} kolom**")
 
     target_column = 'NObeyesdad'
@@ -118,7 +118,7 @@ if df is not None:
         le = LabelEncoder()
         
         # Mengubah data teks menjadi angka (Label Encoding)
-        for col in df_encoded.select_dtypes(include=['object']).columns:
+        for col in df_encoded.select_dtypes(include=['object', 'string']).columns:
             df_encoded[col] = le.fit_transform(df_encoded[col])
             
         # Memisahkan Fitur (X) dan Target (y)
@@ -159,7 +159,7 @@ if df is not None:
                 st.write("**1. Distribusi Kelas Obesitas (Data Asli)**")
                 fig1, ax1 = plt.subplots(figsize=(6, 4))
                 # Menggunakan palet warna mako yang lebih elegan
-                sns.countplot(y=df[target_column], ax=ax1, palette="mako", order=df[target_column].value_counts().index)
+                sns.countplot(y=df[target_column], hue=df[target_column], ax=ax1, palette="mako", order=df[target_column].value_counts().index, legend=False)
                 ax1.set_xlabel("Jumlah Individu")
                 ax1.set_ylabel("Tingkat Obesitas")
                 sns.despine() # Menghapus garis tepi agar lebih bersih
