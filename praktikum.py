@@ -1,33 +1,29 @@
 # =============================================================================
 # Aplikasi Prediksi Tingkat Obesitas
 # Production-Ready Version | Streamlit Community Cloud Compatible
+# Menggunakan Plotly sebagai charting library (lebih stabil dari matplotlib
+# di server headless/cloud, tidak ada risiko Segmentation Fault)
 # =============================================================================
 
-# --- IMPORTS ---
-# matplotlib.use('Agg') HARUS dipanggil sebelum import pyplot untuk mencegah
-# Segmentation Fault pada server headless (no display environment)
-import matplotlib
-matplotlib.use('Agg')
-
+import io
 import os
 import warnings
 from typing import Optional
 
-import matplotlib.pyplot as plt
 import pandas as pd
-import seaborn as sns
+import plotly.express as px
+import plotly.figure_factory as ff
 import streamlit as st
-from sklearn.metrics import accuracy_score, confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import accuracy_score, confusion_matrix
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sklearn.tree import DecisionTreeClassifier
 
-# Suppress semua FutureWarning dan DeprecationWarning dari library pihak ketiga
 warnings.filterwarnings('ignore', category=FutureWarning)
 warnings.filterwarnings('ignore', category=DeprecationWarning)
 
 # =============================================================================
-# KONSTANTA - Diletakkan di atas agar mudah dikonfigurasi
+# KONSTANTA
 # =============================================================================
 DEFAULT_DATASET = 'ObesityDataSet_raw_and_data_sinthetic.csv'
 TARGET_COLUMN   = 'NObeyesdad'
@@ -35,7 +31,7 @@ TEST_SIZE       = 0.2
 RANDOM_STATE    = 42
 
 # =============================================================================
-# KONFIGURASI HALAMAN - WAJIB baris pertama setelah import
+# KONFIGURASI HALAMAN
 # =============================================================================
 st.set_page_config(
     page_title = "Klasifikasi Tingkat Obesitas",
@@ -45,29 +41,27 @@ st.set_page_config(
 )
 
 # =============================================================================
-# CSS - Dipindahkan ke satu blok terpusat untuk maintainability
+# CUSTOM CSS
 # =============================================================================
-CUSTOM_CSS = """
+st.markdown("""
 <style>
-    /* Sembunyikan branding Streamlit bawaan */
     #MainMenu {visibility: hidden;}
     footer     {visibility: hidden;}
     header     {visibility: hidden;}
 
-    /* --- Light Mode Background --- */
+    /* Light Mode */
     .stApp {
         background: linear-gradient(135deg, #ffffff 0%, #c1dfc4 100%);
         background-attachment: fixed;
     }
-    /* Sidebar glassmorphism - Light */
     [data-testid="stSidebar"] {
-        background-color: rgba(255, 255, 255, 0.45) !important;
+        background-color: rgba(255, 255, 255, 0.5) !important;
         backdrop-filter: blur(16px);
         -webkit-backdrop-filter: blur(16px);
-        border-right: 1px solid rgba(255, 255, 255, 0.3);
+        border-right: 1px solid rgba(255,255,255,0.3);
     }
 
-    /* --- Dark Mode Background --- */
+    /* Dark Mode */
     @media (prefers-color-scheme: dark) {
         .stApp {
             background: linear-gradient(135deg, #0d1f14 0%, #0f3424 55%, #115937 100%) !important;
@@ -83,7 +77,7 @@ CUSTOM_CSS = """
         }
     }
 
-    /* --- Judul Utama (Light Mode) --- */
+    /* Judul */
     .main-title {
         font-size: 2.8rem;
         font-weight: 800;
@@ -99,7 +93,7 @@ CUSTOM_CSS = """
         margin-bottom: 1rem;
     }
 
-    /* --- Tombol Hijau Modern --- */
+    /* Tombol */
     .stButton > button {
         background: linear-gradient(90deg, #10B981 0%, #059669 100%);
         color: white !important;
@@ -116,153 +110,132 @@ CUSTOM_CSS = """
         color: white !important;
     }
 
-    /* --- Metric Value Hijau --- */
+    /* Metric */
     [data-testid="stMetricValue"] {
         color: #059669 !important;
         font-weight: 800;
         font-size: 2.4rem !important;
     }
-
-    /* --- Card wrapper tipis untuk section --- */
-    .section-card {
-        background: rgba(255, 255, 255, 0.35);
-        border-radius: 12px;
-        padding: 1.2rem 1.5rem;
-        margin-bottom: 1rem;
-        backdrop-filter: blur(8px);
-        border: 1px solid rgba(255, 255, 255, 0.4);
-    }
 </style>
-"""
-st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
 
 # =============================================================================
-# FUNGSI - Dipisahkan dari logika UI untuk separation of concerns
+# FUNGSI CACHED
 # =============================================================================
 
 @st.cache_data(show_spinner="Memuat dataset...", ttl=3600)
 def load_data(path: str) -> pd.DataFrame:
-    """
-    Memuat CSV dengan caching. @st.cache_data memastikan file hanya dibaca
-    sekali dari disk, lalu disimpan di memori untuk request berikutnya.
-    ttl=3600 berarti cache akan di-refresh setiap 1 jam sekali secara otomatis.
-    """
+    """Baca CSV dari path lokal. Di-cache agar tidak dibaca ulang setiap re-run."""
     return pd.read_csv(path)
 
 
 @st.cache_data(show_spinner="Memuat dataset yang di-upload...", ttl=3600)
-def load_uploaded_data(uploaded_bytes: bytes) -> pd.DataFrame:
-    """
-    Terpisah dari load_data agar hash key berbeda untuk file upload.
-    Menerima bytes agar bisa di-cache dengan benar oleh Streamlit.
-    """
-    import io
-    return pd.read_csv(io.BytesIO(uploaded_bytes))
+def load_uploaded_data(file_bytes: bytes) -> pd.DataFrame:
+    """Baca CSV dari bytes (file upload). Di-cache berdasarkan konten file."""
+    return pd.read_csv(io.BytesIO(file_bytes))
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner="Memproses data...", ttl=3600)
 def preprocess_data(df: pd.DataFrame, target_col: str):
     """
-    Melakukan label encoding dan split data.
-    Di-cache terpisah dari pelatihan model agar preprocessing tidak
-    diulang setiap kali pengguna klik tombol.
-
-    Menggunakan pd.api.types untuk deteksi kolom teks yang aman dan tidak
-    menghasilkan Pandas4Warning (lebih akurat dari select_dtypes(['object'])).
+    Label encoding + train/test split.
+    Menggunakan pd.api.types untuk deteksi kolom string yang aman
+    (menghindari Pandas4Warning dari select_dtypes(['object'])).
     """
-    df_encoded = df.copy()
+    df_enc = df.copy()
     encoders = {}
 
-    # Deteksi kolom kategorikal secara eksplisit menggunakan API publik Pandas
-    # Ini menghindari Pandas4Warning terkait 'object' dtype yang deprecated
     cat_cols = [
-        col for col in df_encoded.columns
-        if pd.api.types.is_string_dtype(df_encoded[col])
-        or pd.api.types.is_object_dtype(df_encoded[col])
+        c for c in df_enc.columns
+        if pd.api.types.is_string_dtype(df_enc[c])
+        or pd.api.types.is_object_dtype(df_enc[c])
     ]
 
     for col in cat_cols:
         le = LabelEncoder()
-        df_encoded[col] = le.fit_transform(df_encoded[col].astype(str))
+        df_enc[col] = le.fit_transform(df_enc[col].astype(str))
         encoders[col] = le
 
-    X = df_encoded.drop(columns=[target_col])
-    y = df_encoded[target_col]
+    X = df_enc.drop(columns=[target_col])
+    y = df_enc[target_col]
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=y
+        X, y,
+        test_size    = TEST_SIZE,
+        random_state = RANDOM_STATE,
+        stratify     = y,
     )
     return X_train, X_test, y_train, y_test, encoders
 
 
-@st.cache_resource(show_spinner=False)
-def train_model(X_train_hash: int, y_train_hash: int):
-    """
-    DUMMY SIGNATURE: st.cache_resource tidak bisa meng-cache ndarray langsung.
-    Solusi: gunakan cache di level pemanggil dengan hash custom.
-
-    Catatan: @st.cache_resource cocok untuk objek berat (model ML) yang
-    ingin di-share antar session tanpa deserialisasi ulang (berbeda dari
-    cache_data yang di-pickle setiap session).
-    """
-    pass
-
-
-def run_training(X_train, X_test, y_train, y_test) -> tuple:
-    """
-    Melatih model Decision Tree dan mengembalikan hasil evaluasi.
-    Dipisahkan ke fungsi sendiri untuk testability.
-    """
+def run_training(X_train, X_test, y_train, y_test):
+    """Latih Decision Tree dan kembalikan model + hasil evaluasi."""
     model = DecisionTreeClassifier(random_state=RANDOM_STATE)
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
-    acc   = accuracy_score(y_test, y_pred)
-    cm    = confusion_matrix(y_test, y_pred)
+    acc    = accuracy_score(y_test, y_pred)
+    cm     = confusion_matrix(y_test, y_pred)
     return model, y_pred, acc, cm
 
 
-def create_distribution_figure(df: pd.DataFrame, target_col: str) -> plt.Figure:
-    """
-    Membuat figure distribusi kelas. Figur HARUS ditutup setelah di-render
-    oleh st.pyplot() untuk mencegah memory leak (matplotlib tidak punya
-    garbage collector otomatis untuk figure objects).
-    """
-    fig, ax = plt.subplots(figsize=(7, 4))
-    order   = df[target_col].value_counts().index
-    sns.countplot(
-        y      = df[target_col],
-        hue    = df[target_col],
-        ax     = ax,
-        palette= "mako",
-        order  = order,
-        legend = False,
+# =============================================================================
+# FUNGSI VISUALISASI — PLOTLY (Bebas Segfault, ringan, interaktif)
+# =============================================================================
+
+def plot_distribution(df: pd.DataFrame, target_col: str):
+    """Bar chart distribusi kelas menggunakan Plotly Express."""
+    counts = df[target_col].value_counts().reset_index()
+    counts.columns = ['Kelas', 'Jumlah']
+    fig = px.bar(
+        counts,
+        x            = 'Jumlah',
+        y            = 'Kelas',
+        orientation  = 'h',
+        color        = 'Kelas',
+        color_discrete_sequence = px.colors.sequential.Teal,
+        title        = 'Distribusi Kelas Obesitas',
+        labels       = {'Jumlah': 'Jumlah Individu', 'Kelas': 'Tingkat Obesitas'},
     )
-    ax.set_xlabel("Jumlah Individu", fontsize=10)
-    ax.set_ylabel("Tingkat Obesitas", fontsize=10)
-    ax.set_title("Distribusi Kelas Target", fontsize=12, fontweight='bold')
-    sns.despine(fig=fig, ax=ax)
-    fig.tight_layout()
+    fig.update_layout(
+        showlegend      = False,
+        plot_bgcolor    = 'rgba(0,0,0,0)',
+        paper_bgcolor   = 'rgba(0,0,0,0)',
+        font_color      = '#1f2937',
+        title_font_size = 14,
+        margin          = dict(l=10, r=10, t=40, b=10),
+    )
     return fig
 
 
-def create_confusion_matrix_figure(cm, labels) -> plt.Figure:
-    """
-    Membuat figure Confusion Matrix menggunakan ConfusionMatrixDisplay
-    (API sklearn terbaru) yang lebih akurat daripada heatmap manual.
-    """
-    fig, ax = plt.subplots(figsize=(7, 5))
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=labels)
-    disp.plot(ax=ax, cmap='Blues', colorbar=False, xticks_rotation='vertical')
-    ax.set_title("Confusion Matrix", fontsize=12, fontweight='bold')
-    ax.set_xlabel("Prediksi Model", fontsize=10)
-    ax.set_ylabel("Data Aktual", fontsize=10)
-    fig.tight_layout()
+def plot_confusion_matrix(cm, labels):
+    """Heatmap Confusion Matrix menggunakan Plotly Figure Factory."""
+    # Buat anotasi teks untuk setiap sel
+    z_text = [[str(val) for val in row] for row in cm.tolist()]
+    fig = ff.create_annotated_heatmap(
+        z           = cm.tolist(),
+        x           = list(labels),
+        y           = list(labels),
+        annotation_text = z_text,
+        colorscale  = 'Blues',
+        showscale   = False,
+    )
+    fig.update_layout(
+        title           = 'Confusion Matrix',
+        title_font_size = 14,
+        xaxis_title     = 'Prediksi Model',
+        yaxis_title     = 'Data Aktual',
+        plot_bgcolor    = 'rgba(0,0,0,0)',
+        paper_bgcolor   = 'rgba(0,0,0,0)',
+        font_color      = '#1f2937',
+        margin          = dict(l=10, r=10, t=60, b=10),
+        yaxis_autorange = 'reversed',
+    )
     return fig
 
 
 # =============================================================================
-# HEADER APLIKASI
+# HEADER
 # =============================================================================
 st.markdown(
     '<p class="main-title">Aplikasi Prediksi Tingkat Obesitas 🩺</p>',
@@ -275,13 +248,13 @@ st.markdown(
 )
 
 # =============================================================================
-# SIDEBAR - PENGATURAN DATASET
+# SIDEBAR — DATASET
 # =============================================================================
 with st.sidebar:
     st.header("⚙️ Pengaturan Dataset")
     st.caption("Sistem mencari dataset lokal otomatis. Jika tidak ada, Anda bisa upload secara manual.")
 
-df = None  # type: Optional[pd.DataFrame]
+df: Optional[pd.DataFrame] = None
 
 if os.path.exists(DEFAULT_DATASET):
     st.sidebar.success("✅ Dataset lokal ditemukan!")
@@ -292,7 +265,8 @@ if os.path.exists(DEFAULT_DATASET):
 else:
     st.sidebar.info("Dataset lokal tidak ditemukan. Silakan upload file CSV.")
     uploaded_file = st.sidebar.file_uploader(
-        "Upload Dataset (CSV)", type=["csv"], help="Format: CSV dengan kolom NObeyesdad sebagai target"
+        "Upload Dataset (CSV)", type=["csv"],
+        help="Format: CSV dengan kolom NObeyesdad sebagai target",
     )
     if uploaded_file is not None:
         try:
@@ -304,14 +278,18 @@ else:
 # MAIN CONTENT
 # =============================================================================
 if df is None:
-    st.info("⏳ Menunggu dataset... Pastikan file **ObesityDataSet_raw_and_data_sinthetic.csv** "
-            "ada di direktori yang sama, atau upload secara manual melalui sidebar.")
-    st.stop()  # Hentikan eksekusi di sini, tidak perlu blok else raksasa
+    st.info(
+        "⏳ Menunggu dataset... Pastikan file "
+        "**ObesityDataSet_raw_and_data_sinthetic.csv** "
+        "ada di direktori yang sama, atau upload secara manual melalui sidebar."
+    )
+    st.stop()
 
-# --- VALIDASI KOLOM TARGET ---
 if TARGET_COLUMN not in df.columns:
-    st.error(f"❌ Kolom target **'{TARGET_COLUMN}'** tidak ditemukan dalam dataset. "
-             f"Kolom yang tersedia: `{', '.join(df.columns.tolist())}`")
+    st.error(
+        f"❌ Kolom target **'{TARGET_COLUMN}'** tidak ditemukan dalam dataset. "
+        f"Kolom yang tersedia: `{', '.join(df.columns.tolist())}`"
+    )
     st.stop()
 
 # --- PRATINJAU DATA ---
@@ -319,20 +297,20 @@ st.markdown("---")
 st.subheader("📋 Pratinjau Dataset")
 
 with st.expander("Klik untuk melihat sampel data (10 baris pertama)"):
-    st.dataframe(df.head(10), use_container_width=True)
+    st.dataframe(df.head(10), width=900)
 
-# Statistik ringkas dataset ditampilkan sebagai metric cards
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Total Baris",   f"{df.shape[0]:,}")
-c2.metric("Total Kolom",   str(df.shape[1]))
-c3.metric("Kelas Target",  str(df[TARGET_COLUMN].nunique()))
-c4.metric("Missing Values", str(df.isnull().sum().sum()))
+c1.metric("Total Baris",    f"{df.shape[0]:,}")
+c2.metric("Total Kolom",    str(df.shape[1]))
+c3.metric("Kelas Target",   str(df[TARGET_COLUMN].nunique()))
+c4.metric("Missing Values", str(int(df.isnull().sum().sum())))
 
-# --- PREPROCESSING (CACHED) ---
+# --- PREPROCESSING ---
 try:
     X_train, X_test, y_train, y_test, encoders = preprocess_data(df, TARGET_COLUMN)
 except Exception as e:
     st.error(f"❌ Gagal melakukan preprocessing: {e}")
+    st.exception(e)
     st.stop()
 
 # --- PELATIHAN MODEL ---
@@ -347,35 +325,31 @@ if st.button("🚀 Latih Model (Decision Tree)"):
 
         st.success("✅ Model berhasil dilatih!")
 
-        # Tampilkan metrik utama
         m1, m2, m3 = st.columns(3)
-        m1.metric(label="🎯 Akurasi Test",  value=f"{acc * 100:.2f}%",  delta="Sangat Baik")
-        m2.metric(label="📊 Data Latih",    value=f"{len(X_train):,}")
-        m3.metric(label="🔬 Data Uji",      value=f"{len(X_test):,}")
+        m1.metric(label="🎯 Akurasi Test", value=f"{acc * 100:.2f}%", delta="Sangat Baik")
+        m2.metric(label="📊 Data Latih",   value=f"{len(X_train):,}")
+        m3.metric(label="🔬 Data Uji",     value=f"{len(X_test):,}")
 
-        # --- VISUALISASI ---
+        # --- VISUALISASI (Plotly — Stabil di Cloud) ---
         st.markdown("---")
         st.subheader("📈 Visualisasi Data & Hasil Evaluasi")
         col1, col2 = st.columns(2)
 
         with col1:
             st.write("**1. Distribusi Kelas Obesitas**")
-            fig1 = create_distribution_figure(df, TARGET_COLUMN)
-            st.pyplot(fig1, use_container_width=True)
-            plt.close(fig1)  # KRITIS: Tutup figure untuk bebaskan memori (cegah memory leak)
+            fig_dist = plot_distribution(df, TARGET_COLUMN)
+            st.plotly_chart(fig_dist, use_container_width=True)
 
         with col2:
             st.write("**2. Confusion Matrix**")
-            # Dapatkan label asli dari encoder target untuk confusion matrix yang terbaca
-            if TARGET_COLUMN in encoders:
-                labels = encoders[TARGET_COLUMN].classes_
-            else:
-                labels = sorted(y_test.unique())
-
-            fig2 = create_confusion_matrix_figure(cm, labels)
-            st.pyplot(fig2, use_container_width=True)
-            plt.close(fig2)  # KRITIS: Tutup figure untuk bebaskan memori
+            labels = (
+                encoders[TARGET_COLUMN].classes_
+                if TARGET_COLUMN in encoders
+                else sorted(y_test.unique())
+            )
+            fig_cm = plot_confusion_matrix(cm, labels)
+            st.plotly_chart(fig_cm, use_container_width=True)
 
     except Exception as e:
         st.error(f"❌ Terjadi kesalahan saat pelatihan: {e}")
-        st.exception(e)  # Tampilkan traceback lengkap untuk debugging di development
+        st.exception(e)
