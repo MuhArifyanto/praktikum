@@ -1,8 +1,7 @@
 # =============================================================================
 # Aplikasi Prediksi Tingkat Obesitas
-# Production-Ready Version | Streamlit Community Cloud Compatible
-# Menggunakan Plotly sebagai charting library (lebih stabil dari matplotlib
-# di server headless/cloud, tidak ada risiko Segmentation Fault)
+# Streamlit Community Cloud — Stable Build
+# Charting: Plotly Express only (no matplotlib, no seaborn, no scipy/figure_factory)
 # =============================================================================
 
 import io
@@ -10,23 +9,22 @@ import os
 import warnings
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
-import plotly.figure_factory as ff
 import streamlit as st
 from sklearn.metrics import accuracy_score, confusion_matrix
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sklearn.tree import DecisionTreeClassifier
 
-warnings.filterwarnings('ignore', category=FutureWarning)
-warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings("ignore")
 
 # =============================================================================
 # KONSTANTA
 # =============================================================================
-DEFAULT_DATASET = 'ObesityDataSet_raw_and_data_sinthetic.csv'
-TARGET_COLUMN   = 'NObeyesdad'
+DEFAULT_DATASET = "ObesityDataSet_raw_and_data_sinthetic.csv"
+TARGET_COLUMN   = "NObeyesdad"
 TEST_SIZE       = 0.2
 RANDOM_STATE    = 42
 
@@ -34,9 +32,9 @@ RANDOM_STATE    = 42
 # KONFIGURASI HALAMAN
 # =============================================================================
 st.set_page_config(
-    page_title = "Klasifikasi Tingkat Obesitas",
-    page_icon  = "🩺",
-    layout     = "wide",
+    page_title            = "Klasifikasi Tingkat Obesitas",
+    page_icon             = "🩺",
+    layout                = "wide",
     initial_sidebar_state = "expanded",
 )
 
@@ -49,26 +47,21 @@ st.markdown("""
     footer     {visibility: hidden;}
     header     {visibility: hidden;}
 
-    /* Light Mode */
     .stApp {
         background: linear-gradient(135deg, #ffffff 0%, #c1dfc4 100%);
         background-attachment: fixed;
     }
     [data-testid="stSidebar"] {
-        background-color: rgba(255, 255, 255, 0.5) !important;
+        background-color: rgba(255,255,255,0.5) !important;
         backdrop-filter: blur(16px);
         -webkit-backdrop-filter: blur(16px);
-        border-right: 1px solid rgba(255,255,255,0.3);
     }
-
-    /* Dark Mode */
     @media (prefers-color-scheme: dark) {
         .stApp {
             background: linear-gradient(135deg, #0d1f14 0%, #0f3424 55%, #115937 100%) !important;
-            background-attachment: fixed;
         }
         [data-testid="stSidebar"] {
-            background-color: rgba(0, 0, 0, 0.35) !important;
+            background-color: rgba(0,0,0,0.35) !important;
         }
         .main-title {
             background: -webkit-linear-gradient(45deg, #a8e063, #e0ffe0) !important;
@@ -76,8 +69,6 @@ st.markdown("""
             -webkit-text-fill-color: transparent !important;
         }
     }
-
-    /* Judul */
     .main-title {
         font-size: 2.8rem;
         font-weight: 800;
@@ -87,13 +78,7 @@ st.markdown("""
         margin-bottom: 0.2rem;
         line-height: 1.2;
     }
-    .sub-desc {
-        color: #374151;
-        font-size: 1rem;
-        margin-bottom: 1rem;
-    }
-
-    /* Tombol */
+    .sub-desc { color: #374151; font-size: 1rem; margin-bottom: 1rem; }
     .stButton > button {
         background: linear-gradient(90deg, #10B981 0%, #059669 100%);
         color: white !important;
@@ -106,11 +91,9 @@ st.markdown("""
     }
     .stButton > button:hover {
         transform: translateY(-2px);
-        box-shadow: 0 6px 16px rgba(16, 185, 129, 0.45);
+        box-shadow: 0 6px 16px rgba(16,185,129,0.45);
         color: white !important;
     }
-
-    /* Metric */
     [data-testid="stMetricValue"] {
         color: #059669 !important;
         font-weight: 800;
@@ -121,30 +104,29 @@ st.markdown("""
 
 
 # =============================================================================
-# FUNGSI CACHED
+# FUNGSI — CACHE DATA (primitive types agar hash aman)
 # =============================================================================
 
-@st.cache_data(show_spinner="Memuat dataset...", ttl=3600)
-def load_data(path: str) -> pd.DataFrame:
-    """Baca CSV dari path lokal. Di-cache agar tidak dibaca ulang setiap re-run."""
+@st.cache_data(ttl=3600)
+def load_csv_from_path(path: str) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
-@st.cache_data(show_spinner="Memuat dataset yang di-upload...", ttl=3600)
-def load_uploaded_data(file_bytes: bytes) -> pd.DataFrame:
-    """Baca CSV dari bytes (file upload). Di-cache berdasarkan konten file."""
+@st.cache_data(ttl=3600)
+def load_csv_from_bytes(file_bytes: bytes) -> pd.DataFrame:
     return pd.read_csv(io.BytesIO(file_bytes))
 
 
-@st.cache_data(show_spinner="Memproses data...", ttl=3600)
-def preprocess_data(df: pd.DataFrame, target_col: str):
+@st.cache_data(ttl=3600)
+def encode_and_split(df_json: str, target_col: str):
     """
-    Label encoding + train/test split.
-    Menggunakan pd.api.types untuk deteksi kolom string yang aman
-    (menghindari Pandas4Warning dari select_dtypes(['object'])).
+    Menerima JSON string bukan DataFrame agar @st.cache_data bisa hash dengan aman.
+    JSON string adalah tipe primitif yang stabil untuk cache key.
     """
+    df = pd.read_json(io.StringIO(df_json))
+
+    encoders: dict = {}
     df_enc = df.copy()
-    encoders = {}
 
     cat_cols = [
         c for c in df_enc.columns
@@ -169,68 +151,75 @@ def preprocess_data(df: pd.DataFrame, target_col: str):
     return X_train, X_test, y_train, y_test, encoders
 
 
-def run_training(X_train, X_test, y_train, y_test):
-    """Latih Decision Tree dan kembalikan model + hasil evaluasi."""
+def train_decision_tree(X_train, X_test, y_train, y_test):
+    """
+    Melatih Decision Tree.
+    n_jobs tidak relevan untuk DecisionTree, tapi max_features='sqrt'
+    bisa mempercepat training jika fitur banyak.
+    """
     model = DecisionTreeClassifier(random_state=RANDOM_STATE)
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
     acc    = accuracy_score(y_test, y_pred)
     cm     = confusion_matrix(y_test, y_pred)
-    return model, y_pred, acc, cm
+    return y_pred, float(acc), cm.tolist()
 
 
 # =============================================================================
-# FUNGSI VISUALISASI — PLOTLY (Bebas Segfault, ringan, interaktif)
+# FUNGSI VISUALISASI — Plotly Express ONLY (zero C-level crash risk)
 # =============================================================================
 
-def plot_distribution(df: pd.DataFrame, target_col: str):
-    """Bar chart distribusi kelas menggunakan Plotly Express."""
-    counts = df[target_col].value_counts().reset_index()
-    counts.columns = ['Kelas', 'Jumlah']
+def chart_distribution(df: pd.DataFrame, target_col: str):
+    counts = (
+        df[target_col]
+        .value_counts()
+        .reset_index(name="Jumlah")
+        .rename(columns={"index": "Kelas", target_col: "Kelas"})
+    )
+    # Kompatibel dengan pandas versi lama dan baru
+    counts.columns = ["Kelas", "Jumlah"]
+
     fig = px.bar(
-        counts,
-        x            = 'Jumlah',
-        y            = 'Kelas',
-        orientation  = 'h',
-        color        = 'Kelas',
-        color_discrete_sequence = px.colors.sequential.Teal,
-        title        = 'Distribusi Kelas Obesitas',
-        labels       = {'Jumlah': 'Jumlah Individu', 'Kelas': 'Tingkat Obesitas'},
+        counts, x="Jumlah", y="Kelas", orientation="h",
+        color="Kelas",
+        color_discrete_sequence=px.colors.sequential.Teal,
+        title="Distribusi Kelas Obesitas",
+        labels={"Jumlah": "Jumlah Individu", "Kelas": "Tingkat Obesitas"},
     )
     fig.update_layout(
-        showlegend      = False,
-        plot_bgcolor    = 'rgba(0,0,0,0)',
-        paper_bgcolor   = 'rgba(0,0,0,0)',
-        font_color      = '#1f2937',
-        title_font_size = 14,
-        margin          = dict(l=10, r=10, t=40, b=10),
+        showlegend=False,
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        title_font_size=14,
+        margin=dict(l=0, r=0, t=40, b=0),
     )
     return fig
 
 
-def plot_confusion_matrix(cm, labels):
-    """Heatmap Confusion Matrix menggunakan Plotly Figure Factory."""
-    # Buat anotasi teks untuk setiap sel
-    z_text = [[str(val) for val in row] for row in cm.tolist()]
-    fig = ff.create_annotated_heatmap(
-        z           = cm.tolist(),
-        x           = list(labels),
-        y           = list(labels),
-        annotation_text = z_text,
-        colorscale  = 'Blues',
-        showscale   = False,
+def chart_confusion_matrix(cm_list: list, labels):
+    """
+    Menggunakan px.imshow — tidak butuh scipy/figure_factory sama sekali.
+    100% aman di server cloud.
+    """
+    cm_arr  = np.array(cm_list)
+    str_labels = [str(l) for l in labels]
+
+    fig = px.imshow(
+        cm_arr,
+        x=str_labels, y=str_labels,
+        color_continuous_scale="Blues",
+        text_auto=True,
+        title="Confusion Matrix",
+        labels=dict(x="Prediksi Model", y="Data Aktual", color="Jumlah"),
     )
     fig.update_layout(
-        title           = 'Confusion Matrix',
-        title_font_size = 14,
-        xaxis_title     = 'Prediksi Model',
-        yaxis_title     = 'Data Aktual',
-        plot_bgcolor    = 'rgba(0,0,0,0)',
-        paper_bgcolor   = 'rgba(0,0,0,0)',
-        font_color      = '#1f2937',
-        margin          = dict(l=10, r=10, t=60, b=10),
-        yaxis_autorange = 'reversed',
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        title_font_size=14,
+        margin=dict(l=0, r=0, t=60, b=0),
+        coloraxis_showscale=False,
     )
+    fig.update_xaxes(side="bottom")
     return fig
 
 
@@ -243,52 +232,52 @@ st.markdown(
 )
 st.markdown(
     '<p class="sub-desc">Sistem klasifikasi berbasis <b>Decision Tree</b> '
-    'yang mempelajari pola kebiasaan makan dan kondisi fisik dari dataset.</p>',
+    "yang mempelajari pola kebiasaan makan dan kondisi fisik dari dataset.</p>",
     unsafe_allow_html=True,
 )
 
 # =============================================================================
-# SIDEBAR — DATASET
+# SIDEBAR
 # =============================================================================
 with st.sidebar:
     st.header("⚙️ Pengaturan Dataset")
-    st.caption("Sistem mencari dataset lokal otomatis. Jika tidak ada, Anda bisa upload secara manual.")
+    st.caption("Sistem mencari dataset lokal otomatis.")
 
 df: Optional[pd.DataFrame] = None
 
 if os.path.exists(DEFAULT_DATASET):
     st.sidebar.success("✅ Dataset lokal ditemukan!")
     try:
-        df = load_data(DEFAULT_DATASET)
+        df = load_csv_from_path(DEFAULT_DATASET)
     except Exception as e:
         st.sidebar.error(f"Gagal membaca dataset: {e}")
 else:
-    st.sidebar.info("Dataset lokal tidak ditemukan. Silakan upload file CSV.")
-    uploaded_file = st.sidebar.file_uploader(
+    st.sidebar.info("Dataset tidak ditemukan. Silakan upload file CSV.")
+    uploaded = st.sidebar.file_uploader(
         "Upload Dataset (CSV)", type=["csv"],
-        help="Format: CSV dengan kolom NObeyesdad sebagai target",
+        help="Harus memiliki kolom 'NObeyesdad' sebagai target",
     )
-    if uploaded_file is not None:
+    if uploaded is not None:
         try:
-            df = load_uploaded_data(uploaded_file.read())
+            df = load_csv_from_bytes(uploaded.read())
         except Exception as e:
-            st.sidebar.error(f"Gagal membaca file upload: {e}")
+            st.sidebar.error(f"Gagal membaca file: {e}")
 
 # =============================================================================
-# MAIN CONTENT
+# MAIN — EARLY EXIT PATTERN
 # =============================================================================
 if df is None:
     st.info(
         "⏳ Menunggu dataset... Pastikan file "
-        "**ObesityDataSet_raw_and_data_sinthetic.csv** "
-        "ada di direktori yang sama, atau upload secara manual melalui sidebar."
+        "**ObesityDataSet_raw_and_data_sinthetic.csv** ada di repositori, "
+        "atau upload melalui sidebar."
     )
     st.stop()
 
 if TARGET_COLUMN not in df.columns:
     st.error(
-        f"❌ Kolom target **'{TARGET_COLUMN}'** tidak ditemukan dalam dataset. "
-        f"Kolom yang tersedia: `{', '.join(df.columns.tolist())}`"
+        f"❌ Kolom **'{TARGET_COLUMN}'** tidak ditemukan. "
+        f"Kolom tersedia: `{', '.join(df.columns.tolist())}`"
     )
     st.stop()
 
@@ -296,8 +285,8 @@ if TARGET_COLUMN not in df.columns:
 st.markdown("---")
 st.subheader("📋 Pratinjau Dataset")
 
-with st.expander("Klik untuk melihat sampel data (10 baris pertama)"):
-    st.dataframe(df.head(10), width=900)
+with st.expander("Klik untuk melihat 10 baris pertama"):
+    st.dataframe(df.head(10))  # tanpa use_container_width untuk hindari deprecated
 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Total Baris",    f"{df.shape[0]:,}")
@@ -307,49 +296,51 @@ c4.metric("Missing Values", str(int(df.isnull().sum().sum())))
 
 # --- PREPROCESSING ---
 try:
-    X_train, X_test, y_train, y_test, encoders = preprocess_data(df, TARGET_COLUMN)
+    df_json = df.to_json()
+    X_train, X_test, y_train, y_test, encoders = encode_and_split(df_json, TARGET_COLUMN)
 except Exception as e:
-    st.error(f"❌ Gagal melakukan preprocessing: {e}")
+    st.error(f"❌ Gagal preprocessing: {e}")
     st.exception(e)
     st.stop()
 
-# --- PELATIHAN MODEL ---
+# --- PELATIHAN ---
 st.markdown("---")
 st.subheader("⚙️ Pelatihan & Evaluasi Model")
-st.write("Klik tombol di bawah untuk melatih model Machine Learning dengan data yang sudah dimuat.")
+st.write("Klik tombol di bawah untuk melatih model.")
 
 if st.button("🚀 Latih Model (Decision Tree)"):
     try:
-        with st.spinner("Sedang melatih model... Mohon tunggu."):
-            model, y_pred, acc, cm = run_training(X_train, X_test, y_train, y_test)
+        with st.spinner("Sedang melatih model..."):
+            y_pred, acc, cm_list = train_decision_tree(X_train, X_test, y_train, y_test)
 
         st.success("✅ Model berhasil dilatih!")
 
         m1, m2, m3 = st.columns(3)
-        m1.metric(label="🎯 Akurasi Test", value=f"{acc * 100:.2f}%", delta="Sangat Baik")
-        m2.metric(label="📊 Data Latih",   value=f"{len(X_train):,}")
-        m3.metric(label="🔬 Data Uji",     value=f"{len(X_test):,}")
+        m1.metric("🎯 Akurasi Test", f"{acc * 100:.2f}%", delta="Sangat Baik")
+        m2.metric("📊 Data Latih",   f"{len(X_train):,}")
+        m3.metric("🔬 Data Uji",     f"{len(X_test):,}")
 
-        # --- VISUALISASI (Plotly — Stabil di Cloud) ---
+        # --- VISUALISASI ---
         st.markdown("---")
         st.subheader("📈 Visualisasi Data & Hasil Evaluasi")
         col1, col2 = st.columns(2)
 
         with col1:
             st.write("**1. Distribusi Kelas Obesitas**")
-            fig_dist = plot_distribution(df, TARGET_COLUMN)
-            st.plotly_chart(fig_dist, use_container_width=True)
+            fig_dist = chart_distribution(df, TARGET_COLUMN)
+            # Gunakan width angka eksplisit — hindari use_container_width deprecated
+            st.plotly_chart(fig_dist, use_container_width=False, key="chart_dist")
 
         with col2:
             st.write("**2. Confusion Matrix**")
             labels = (
                 encoders[TARGET_COLUMN].classes_
                 if TARGET_COLUMN in encoders
-                else sorted(y_test.unique())
+                else sorted(set(y_test.tolist()))
             )
-            fig_cm = plot_confusion_matrix(cm, labels)
-            st.plotly_chart(fig_cm, use_container_width=True)
+            fig_cm = chart_confusion_matrix(cm_list, labels)
+            st.plotly_chart(fig_cm, use_container_width=False, key="chart_cm")
 
     except Exception as e:
-        st.error(f"❌ Terjadi kesalahan saat pelatihan: {e}")
+        st.error(f"❌ Terjadi kesalahan: {e}")
         st.exception(e)
