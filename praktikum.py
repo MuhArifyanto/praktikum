@@ -1,7 +1,7 @@
 # =============================================================================
 # Aplikasi Prediksi Tingkat Obesitas
 # Streamlit Community Cloud — Stable Build
-# Charting: Plotly Express only (no matplotlib, no seaborn, no scipy/figure_factory)
+# Charting: Plotly Express only (no matplotlib, no seaborn)
 # =============================================================================
 
 import io
@@ -104,30 +104,36 @@ st.markdown("""
 
 
 # =============================================================================
-# FUNGSI — CACHE DATA (primitive types agar hash aman)
+# FUNGSI — LOAD DATA (cache_data dengan tipe primitif sebagai key)
 # =============================================================================
 
-@st.cache_data(ttl=3600)
+@st.cache_data(show_spinner="Memuat dataset...")
 def load_csv_from_path(path: str) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(show_spinner="Memuat dataset...")
 def load_csv_from_bytes(file_bytes: bytes) -> pd.DataFrame:
     return pd.read_csv(io.BytesIO(file_bytes))
 
 
-@st.cache_data(ttl=3600)
+# =============================================================================
+# FUNGSI — PREPROCESSING (FIX: terima JSON string, bukan parquet/DataFrame)
+# JSON dipilih karena: aman, tidak butuh pyarrow, kompatibel di semua env
+# =============================================================================
+
+@st.cache_data(show_spinner="Memproses data...")
 def encode_and_split(df_json: str, target_col: str):
     """
-    Menerima JSON string bukan DataFrame agar @st.cache_data bisa hash dengan aman.
-    JSON string adalah tipe primitif yang stabil untuk cache key.
+    Menerima JSON string agar @st.cache_data bisa hash dengan aman.
+    PERBAIKAN: tidak lagi menggunakan parquet (butuh pyarrow).
     """
     df = pd.read_json(io.StringIO(df_json))
 
     encoders: dict = {}
     df_enc = df.copy()
 
+    # Gunakan is_string_dtype + is_object_dtype untuk hindari Pandas4Warning
     cat_cols = [
         c for c in df_enc.columns
         if pd.api.types.is_string_dtype(df_enc[c])
@@ -151,36 +157,31 @@ def encode_and_split(df_json: str, target_col: str):
     return X_train, X_test, y_train, y_test, encoders
 
 
+# =============================================================================
+# FUNGSI — TRAINING
+# PERBAIKAN: Tidak menggunakan @st.cache_resource (tidak bisa hash numpy array).
+# Hasil evaluasi disimpan di st.session_state untuk persistensi antar re-run.
+# =============================================================================
+
 def train_decision_tree(X_train, X_test, y_train, y_test):
-    """
-    Melatih Decision Tree.
-    n_jobs tidak relevan untuk DecisionTree, tapi max_features='sqrt'
-    bisa mempercepat training jika fitur banyak.
-    """
     model = DecisionTreeClassifier(random_state=RANDOM_STATE)
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
     acc    = accuracy_score(y_test, y_pred)
     cm     = confusion_matrix(y_test, y_pred)
-    return y_pred, float(acc), cm.tolist()
+    return float(acc), cm.tolist()
 
 
 # =============================================================================
-# FUNGSI VISUALISASI — Plotly Express ONLY (zero C-level crash risk)
+# FUNGSI VISUALISASI — Plotly Express (tidak butuh scipy/C extension)
 # =============================================================================
 
 def chart_distribution(df: pd.DataFrame, target_col: str):
-    counts = (
-        df[target_col]
-        .value_counts()
-        .reset_index(name="Jumlah")
-        .rename(columns={"index": "Kelas", target_col: "Kelas"})
-    )
-    # Kompatibel dengan pandas versi lama dan baru
-    counts.columns = ["Kelas", "Jumlah"]
+    vc = df[target_col].value_counts().reset_index()
+    vc.columns = ["Kelas", "Jumlah"]
 
     fig = px.bar(
-        counts, x="Jumlah", y="Kelas", orientation="h",
+        vc, x="Jumlah", y="Kelas", orientation="h",
         color="Kelas",
         color_discrete_sequence=px.colors.sequential.Teal,
         title="Distribusi Kelas Obesitas",
@@ -197,12 +198,9 @@ def chart_distribution(df: pd.DataFrame, target_col: str):
 
 
 def chart_confusion_matrix(cm_list: list, labels):
-    """
-    Menggunakan px.imshow — tidak butuh scipy/figure_factory sama sekali.
-    100% aman di server cloud.
-    """
-    cm_arr  = np.array(cm_list)
-    str_labels = [str(l) for l in labels]
+    """px.imshow tidak butuh scipy/figure_factory — bebas Segfault."""
+    cm_arr     = np.array(cm_list)
+    str_labels = [str(lbl) for lbl in labels]
 
     fig = px.imshow(
         cm_arr,
@@ -264,13 +262,12 @@ else:
             st.sidebar.error(f"Gagal membaca file: {e}")
 
 # =============================================================================
-# MAIN — EARLY EXIT PATTERN
+# MAIN
 # =============================================================================
 if df is None:
     st.info(
         "⏳ Menunggu dataset... Pastikan file "
-        "**ObesityDataSet_raw_and_data_sinthetic.csv** ada di repositori, "
-        "atau upload melalui sidebar."
+        "**ObesityDataSet_raw_and_data_sinthetic.csv** ada di repositori."
     )
     st.stop()
 
@@ -286,7 +283,7 @@ st.markdown("---")
 st.subheader("📋 Pratinjau Dataset")
 
 with st.expander("Klik untuk melihat 10 baris pertama"):
-    st.dataframe(df.head(10))  # tanpa use_container_width untuk hindari deprecated
+    st.dataframe(df.head(10))
 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Total Baris",    f"{df.shape[0]:,}")
@@ -310,37 +307,45 @@ st.write("Klik tombol di bawah untuk melatih model.")
 
 if st.button("🚀 Latih Model (Decision Tree)"):
     try:
-        with st.spinner("Sedang melatih model..."):
-            y_pred, acc, cm_list = train_decision_tree(X_train, X_test, y_train, y_test)
+        with st.spinner("Melatih model..."):
+            acc, cm_list = train_decision_tree(X_train, X_test, y_train, y_test)
 
-        st.success("✅ Model berhasil dilatih!")
-
-        m1, m2, m3 = st.columns(3)
-        m1.metric("🎯 Akurasi Test", f"{acc * 100:.2f}%", delta="Sangat Baik")
-        m2.metric("📊 Data Latih",   f"{len(X_train):,}")
-        m3.metric("🔬 Data Uji",     f"{len(X_test):,}")
-
-        # --- VISUALISASI ---
-        st.markdown("---")
-        st.subheader("📈 Visualisasi Data & Hasil Evaluasi")
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.write("**1. Distribusi Kelas Obesitas**")
-            fig_dist = chart_distribution(df, TARGET_COLUMN)
-            # Gunakan width angka eksplisit — hindari use_container_width deprecated
-            st.plotly_chart(fig_dist, use_container_width=False, key="chart_dist")
-
-        with col2:
-            st.write("**2. Confusion Matrix**")
-            labels = (
-                encoders[TARGET_COLUMN].classes_
-                if TARGET_COLUMN in encoders
-                else sorted(set(y_test.tolist()))
-            )
-            fig_cm = chart_confusion_matrix(cm_list, labels)
-            st.plotly_chart(fig_cm, use_container_width=False, key="chart_cm")
+        # Simpan hasil ke session_state agar tidak hilang saat re-run
+        st.session_state["acc"]     = acc
+        st.session_state["cm_list"] = cm_list
+        st.session_state["trained"] = True
 
     except Exception as e:
-        st.error(f"❌ Terjadi kesalahan: {e}")
+        st.error(f"❌ Terjadi kesalahan saat training: {e}")
         st.exception(e)
+
+# Tampilkan hasil jika sudah pernah dilatih (persistent across reruns)
+if st.session_state.get("trained"):
+    acc     = st.session_state["acc"]
+    cm_list = st.session_state["cm_list"]
+
+    st.success("✅ Model berhasil dilatih!")
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("🎯 Akurasi Test", f"{acc * 100:.2f}%", delta="Sangat Baik")
+    m2.metric("📊 Data Latih",   f"{len(X_train):,}")
+    m3.metric("🔬 Data Uji",     f"{len(X_test):,}")
+
+    st.markdown("---")
+    st.subheader("📈 Visualisasi Data & Hasil Evaluasi")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.write("**1. Distribusi Kelas Obesitas**")
+        fig_dist = chart_distribution(df, TARGET_COLUMN)
+        st.plotly_chart(fig_dist, key="chart_dist")
+
+    with col2:
+        st.write("**2. Confusion Matrix**")
+        labels = (
+            encoders[TARGET_COLUMN].classes_
+            if TARGET_COLUMN in encoders
+            else sorted(set(y_test.tolist()))
+        )
+        fig_cm = chart_confusion_matrix(cm_list, labels)
+        st.plotly_chart(fig_cm, key="chart_cm")
